@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 import pickle
 import numpy as np
+import pandas as pd
+
 
 app = Flask(__name__)
 
@@ -10,6 +12,8 @@ with open("iris_model.pkl", "rb") as f:
     
 with open("housing_model.pkl", "rb") as f:
     housing_model = pickle.load(f)
+
+
 
 HOUSING_COLUMNS = [
     "area", "bedrooms", "bathrooms", "stories", "parking",
@@ -24,11 +28,10 @@ def home():
     return "ML Model is Running: /predict-iris and /predict-housing available"
 
 
-# def predict():
-#     data = request.get_json()
-#     input_features = np.array(data["features"]).reshape(1, -1)
-#     prediction = model.predict(input_features)
-#     return jsonify({"prediction": int(prediction[0])})
+@app.route("/health", methods=["GET", "POST"])
+def health_check():
+    return jsonify({"status": "ok"})
+
 
 
 @app.route("/predict-iris", methods=["POST"])
@@ -38,12 +41,35 @@ def predict_iris():
         return jsonify({"error": "Missing 'features' key. Expected format: {'features': [f1, f2, f3, f4]}"}), 400
 
     features = data["features"]
-    if not isinstance(features, list) or len(features) != 4:
-        return jsonify({"error": "Expected 4 numeric values for Iris features."}), 400
-
-    input_array = np.array(features).reshape(1, -1)
-    prediction = iris_model.predict(input_array)
-    return jsonify({"prediction": int(prediction[0])})
+    
+    # Handle multiple inputs (Exercise 2)
+    if isinstance(features[0], list):
+        # Input validation (Exercise 3)
+        for feature_set in features:
+            if not isinstance(feature_set, list) or len(feature_set) != 4:
+                return jsonify({"error": "Each input must have exactly 4 numeric values for Iris features."}), 400
+        
+        input_array = np.array(features)
+        predictions = iris_model.predict(input_array).tolist()
+        
+        # Add confidence scores (Exercise 1)
+        probabilities = iris_model.predict_proba(input_array)
+        confidences = [float(max(proba_set)) for proba_set in probabilities]
+        
+        return jsonify({"predictions": predictions, "confidences": confidences})
+    else:
+        # Input validation (Exercise 3)
+        if not isinstance(features, list) or len(features) != 4:
+            return jsonify({"error": "Expected 4 numeric values for Iris features."}), 400
+        
+        input_array = np.array(features).reshape(1, -1)
+        prediction = iris_model.predict(input_array)[0]
+        
+        # Add confidence score (Exercise 1)
+        probability = iris_model.predict_proba(input_array)[0]
+        confidence = float(max(probability))
+        
+        return jsonify({"prediction": int(prediction), "confidence": confidence})
 
 
 
@@ -75,9 +101,21 @@ def predict_housing():
     try:
         input_df = pd.DataFrame([features], columns=HOUSING_COLUMNS)
         prediction = housing_model.predict(input_df)[0]
-        return jsonify({"prediction": int(round(prediction))})
+        
+        confidence = None
+        if hasattr(housing_model, 'predict_proba'):
+            probability = housing_model.predict_proba(input_df)[0]
+            confidence = float(max(probability))
+        
+        response = {"prediction": int(round(prediction))}
+        if confidence is not None:
+            response["confidence"] = confidence
+            
+        return jsonify(response)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
 
 
 

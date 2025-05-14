@@ -14,6 +14,8 @@ from sklearn.compose import TransformedTargetRegressor
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import cross_val_score
 import numpy as np
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import make_pipeline
 
 
 iris = load_iris()
@@ -34,12 +36,14 @@ with open("app/iris_model.pkl", "wb") as f:
 # Boolean (categorical): mainroad, guestroom, basement, hotwaterheating, airconditioning, prefarea
 # Ordinal (categorical): furnishingstatus
 
-
 # Loading and binning for stratification
 df = pd.read_csv("Housing.csv")
+df = df[df["price"] > 0].dropna()
 X = df.drop("price", axis=1)
 y = df["price"]
 y_binned = pd.qcut(y, q=5, labels=False)
+
+
 
 # Binarization of yes/no
 bool_cols = ["mainroad","guestroom","basement","hotwaterheating","airconditioning","prefarea"]
@@ -49,16 +53,21 @@ X[bool_cols] = X[bool_cols].apply(lambda col: col.str.lower().map({"yes":1,"no":
 X["area_per_bed"] = X["area"] / X["bedrooms"].replace(0,1)
 X["rooms_total"]  = X["bedrooms"] + X["bathrooms"]
 
+# print(X.isnull().sum())
+# print(y.isnull().sum())
+
+
 # Column definitions
 categorical_features = ["furnishingstatus"]
 numerical_features = ["area","bedrooms","bathrooms","stories","parking",
-                      "area_per_bed","rooms_total"] + bool_cols
+                    "area_per_bed","rooms_total"] + bool_cols
 
-# Ordinal preprocessor + passthrough
+num_pipeline = make_pipeline(SimpleImputer(strategy='mean'))
+
+
 preprocessor = ColumnTransformer([
-    ("ord", OrdinalEncoder(categories=[["unfurnished","semi-furnished","furnished"]]),
-     ["furnishingstatus"]),
-    ("pass", "passthrough", numerical_features)
+    ("ord", OrdinalEncoder(categories=[["unfurnished", "semi-furnished", "furnished"]]), ["furnishingstatus"]),
+    ("num", num_pipeline, numerical_features)
 ])
 
 # Model with log-target
@@ -66,6 +75,8 @@ ttr = TransformedTargetRegressor(
     regressor=RandomForestRegressor(random_state=42, n_jobs=-1),
     func=np.log1p, inverse_func=np.expm1
 )
+
+
 pipeline = Pipeline([("pre", preprocessor), ("reg", ttr)])
 
 # Stratified and shuffled split
@@ -77,15 +88,17 @@ X_train, X_test, y_train, y_test = train_test_split(
     stratify=y_binned
 )
 
-# Hyperparameter search (i did xboost before)
 param_dist = {
-    "reg__regressor__n_estimators": [100,300,500],
-    "reg__regressor__max_depth": [None,10,20],
-    "reg__regressor__min_samples_leaf": [1,2,5]
+    "reg__regressor__n_estimators": [100, 200, 300],
+    "reg__regressor__max_depth": [None, 10, 20, 30],
+    "reg__regressor__min_samples_split": [2, 5, 10],
+    "reg__regressor__min_samples_leaf": [1, 2, 4],
+    # "reg__regressor__max_features": ["sqrt", "log2", None],
+    "reg__regressor__bootstrap": [True, False]
 }
 search = RandomizedSearchCV(
     pipeline, param_dist,
-    n_iter=12,
+    n_iter=20,
     cv=5,
     scoring="neg_root_mean_squared_error",
     n_jobs=-1,
@@ -93,6 +106,9 @@ search = RandomizedSearchCV(
     verbose=1
 )
 search.fit(X_train, y_train)
+
+
+
 best_model = search.best_estimator_
 print("Optimal params:", search.best_params_)
 
@@ -107,6 +123,8 @@ cv_scores = cross_val_score(best_model, X, y,
                             scoring="neg_root_mean_squared_error",
                             n_jobs=-1)
 print("CV RMSE :", -cv_scores.mean(), "±", cv_scores.std())
+
+
 
 # Save
 import pickle
