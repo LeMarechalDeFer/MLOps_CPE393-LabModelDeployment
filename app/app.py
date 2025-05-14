@@ -102,16 +102,7 @@ def predict_housing():
         input_df = pd.DataFrame([features], columns=HOUSING_COLUMNS)
         prediction = housing_model.predict(input_df)[0]
         
-        confidence = None
-        if hasattr(housing_model, 'predict_proba'):
-            probability = housing_model.predict_proba(input_df)[0]
-            confidence = float(max(probability))
-        
-        response = {"prediction": int(round(prediction))}
-        if confidence is not None:
-            response["confidence"] = confidence
-            
-        return jsonify(response)
+        return jsonify({"prediction": int(round(prediction))})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
